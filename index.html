@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Chess vs Stockfish</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; font-family: 'IBM Plex Sans', sans-serif; }
+    body { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #f5f4f0; }
+    .wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 24px 16px; width: 100%; }
+
+    .status     { font-size: 15px; font-weight: 500; color: #111; text-align: center; min-height: 22px; }
+    .engine-msg { font-size: 12px; color: #999; min-height: 16px; text-align: center; }
+
+    .settings { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+    .setting-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
+    .setting-label { font-size: 13px; color: #666; white-space: nowrap; }
+
+    .btn-group { display: flex; gap: 6px; }
+    .opt-btn {
+      font-family: 'IBM Plex Sans', sans-serif; font-size: 13px;
+      padding: 6px 16px; border-radius: 8px; border: 0.5px solid #ccc;
+      background: transparent; color: #111; cursor: pointer;
+      transition: background 0.12s, opacity 0.12s;
+    }
+    .opt-btn:hover:not(:disabled) { background: #f0eeea; }
+    .opt-btn.active  { background: #1a4fd6; color: #fff; border-color: #1a4fd6; }
+    .opt-btn:disabled { opacity: 0.35; cursor: default; }
+
+    .slider-row { display: flex; align-items: center; gap: 10px; }
+    input[type=range] {
+      -webkit-appearance: none; appearance: none;
+      width: 200px; height: 4px; background: #ddd; border-radius: 2px;
+      outline: none; cursor: pointer;
+    }
+    input[type=range]:disabled { opacity: 0.35; cursor: default; }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 16px; height: 16px;
+      border-radius: 50%; background: #1a4fd6; cursor: pointer;
+    }
+    input[type=range]::-moz-range-thumb {
+      width: 16px; height: 16px; border-radius: 50%;
+      background: #1a4fd6; cursor: pointer; border: none;
+    }
+    .skill-info  { display: flex; align-items: center; gap: 8px; }
+    .skill-level { font-size: 14px; font-weight: 500; color: #111; min-width: 22px; }
+    .skill-elo   { font-size: 13px; color: #666; }
+
+    :root { --sq: min(68px, calc((100vw - 48px) / 8)); }
+
+    .board-outer { display: flex; gap: 4px; align-items: flex-start; }
+    .rank-labels { display: flex; flex-direction: column; }
+    .rank-label  { font-size: 11px; color: #999; width: 14px; height: var(--sq); display: flex; align-items: center; justify-content: center; }
+    .board-col   { display: flex; flex-direction: column; }
+    .file-labels { display: flex; padding-top: 4px; }
+    .file-label  { font-size: 11px; color: #999; width: var(--sq); text-align: center; }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(8, var(--sq));
+      grid-template-rows: repeat(8, var(--sq));
+      border: 2px solid #8b6914; border-radius: 3px;
+      overflow: hidden; user-select: none; touch-action: none;
+    }
+    .sq {
+      width: var(--sq); height: var(--sq);
+      display: flex; align-items: center; justify-content: center;
+      position: relative; cursor: pointer; touch-action: none;
+    }
+    .sq.light { background: #f0d9b5; }
+    .sq.dark  { background: #b58863; }
+    .sq.selected  { background: #f6f669 !important; }
+    .sq.last-from { background: #cdd26a !important; }
+    .sq.last-to   { background: #aaa23a !important; }
+    .sq.in-check  { background: #e74c3c !important; }
+    .sq.legal::after {
+      content: ''; position: absolute;
+      width: 30%; height: 30%;
+      background: rgba(0,0,0,0.16); border-radius: 50%; pointer-events: none;
+    }
+    .sq.legal-capture::after {
+      content: ''; position: absolute; inset: 0;
+      box-shadow: inset 0 0 0 4px rgba(0,0,0,0.18); pointer-events: none;
+    }
+    .piece-img {
+      width: 88%; height: 88%; object-fit: contain;
+      pointer-events: none; position: relative; z-index: 1; display: block;
+      /* prevent browser drag-image ghost */
+      -webkit-user-drag: none; user-drag: none;
+    }
+
+    /* Drag ghost — created dynamically */
+    .drag-ghost {
+      position: fixed; pointer-events: none; z-index: 9999;
+      width: calc(var(--sq) * 1.15); height: calc(var(--sq) * 1.15);
+      transform: translate(-50%, -50%);
+      object-fit: contain; opacity: 0.92;
+    }
+
+    .ctrl-btn {
+      font-family: 'IBM Plex Sans', sans-serif; font-size: 14px;
+      padding: 8px 20px; border-radius: 8px; border: 0.5px solid #ccc;
+      background: transparent; color: #111; cursor: pointer; transition: background 0.12s;
+    }
+    .ctrl-btn:hover { background: #f0eeea; }
+
+    .material-panel {
+      display: flex; flex-direction: column; justify-content: space-between;
+      height: calc(var(--sq) * 8); width: 60px; flex-shrink: 0;
+    }
+    .material-row { display: flex; flex-direction: column; gap: 1px; }
+    .material-pieces-line {
+      display: flex; flex-wrap: wrap; align-items: center;
+      min-height: 16px; gap: 0;
+    }
+    .m-piece { width: 16px; height: 16px; object-fit: contain; margin-right: -3px; }
+    .material-adv { font-size: 11px; font-weight: 500; color: #444; padding-left: 5px; }
+
+    .promo-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45); z-index: 100;
+      align-items: center; justify-content: center;
+    }
+    .promo-overlay.visible { display: flex; }
+    .promo-box {
+      background: #fff; border-radius: 12px;
+      padding: 24px 28px; display: flex; flex-direction: column;
+      align-items: center; gap: 16px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    }
+    .promo-title  { font-size: 15px; font-weight: 500; }
+    .promo-pieces { display: flex; gap: 10px; }
+    .promo-piece  {
+      width: 64px; height: 64px;
+      display: flex; align-items: center; justify-content: center;
+      border: 1px solid #ddd; border-radius: 8px; cursor: pointer;
+      transition: background 0.1s;
+    }
+    .promo-piece:hover { background: #f0eeea; }
+    .promo-piece img   { width: 80%; height: 80%; object-fit: contain; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="status"     id="status">Loading Stockfish...</div>
+  <div class="engine-msg" id="engine-msg"></div>
+
+  <div class="settings">
+    <div class="setting-row">
+      <span class="setting-label">Play as:</span>
+      <div class="btn-group">
+        <button class="opt-btn active" data-color="w">White</button>
+        <button class="opt-btn"        data-color="b">Black</button>
+      </div>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">Level:</span>
+      <div class="slider-row">
+        <input type="range" id="skill-slider" min="0" max="20" value="5">
+        <div class="skill-info">
+          <span class="skill-level" id="skill-num">5</span>
+          <span class="skill-elo"   id="skill-elo">≈ 1100 ELO</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="board-outer">
+    <div class="material-panel">
+      <div class="material-row" id="material-top"></div>
+      <div class="material-row" id="material-bottom"></div>
+    </div>
+    <div class="rank-labels" id="rank-labels"></div>
+    <div class="board-col">
+      <div class="board" id="board"></div>
+      <div class="file-labels" id="file-labels"></div>
+    </div>
+  </div>
+
+  <button class="ctrl-btn" onclick="newGame()">New game</button>
+</div>
+
+<div class="promo-overlay" id="promo-overlay">
+  <div class="promo-box">
+    <div class="promo-title">Promote pawn to:</div>
+    <div class="promo-pieces" id="promo-pieces"></div>
+  </div>
+</div>
+
+<script>
+// ── Level config ──────────────────────────────────────────────────────────────
+// depth      : Stockfish search depth (null = use movetime)
+// movetime   : ms to search (only used if depth is null)
+// multiPV    : how many candidate moves to request from Stockfish
+// threshold  : centipawn gap — if best move beats candidate by MORE than this,
+//              that candidate is dropped. Wide threshold = plays weaker moves often.
+// minThink   : minimum ms before move is applied (prevents instant moves)
+const LEVELS = [
+  { elo:  600, skill: 0, depth: 5, movetime: null, multiPV: 3, threshold: 700, minThink: 600  },
+  { elo:  700, skill: 0, depth: 5, movetime: null, multiPV: 3, threshold: 550, minThink: 650  },
+  { elo:  800, skill: 1, depth: 5, movetime: null, multiPV: 3, threshold: 400, minThink: 700  },
+  { elo:  900, skill: 1, depth: 5, movetime: null, multiPV: 3, threshold: 280, minThink: 750  },
+  { elo: 1000, skill: 2, depth: 5, movetime: null, multiPV: 3, threshold: 180, minThink: 800  },
+  { elo: 1100, skill: 3, depth: 5, movetime: null, multiPV: 3, threshold: 120, minThink: 850  },
+  { elo: 1200, skill: 4, depth: 6, movetime: null, multiPV: 3, threshold: 80,  minThink: 900  },
+  { elo: 1350, skill: 5, depth: 6, movetime: null, multiPV: 3, threshold: 50,  minThink: 950  },
+  { elo: 1500, skill: 6, depth: 7, movetime: null, multiPV: 3, threshold: 30,  minThink: 1000 },
+  { elo: 1650, skill: 7, depth: 8, movetime: null, multiPV: 2, threshold: 15,  minThink: 1100 },
+  { elo: 1800, skill: 8, depth: 9, movetime: null, multiPV: 2, threshold: 6,   minThink: 1200 },
+  { elo: 1900, skill:10, depth:10, movetime: null, multiPV: 2, threshold: 2,   minThink: 1400 },
+  { elo: 2000, skill:12, depth:11, movetime: null, multiPV: 1, threshold: 0,   minThink: 1500 },
+  { elo: 2100, skill:13, depth:12, movetime: null, multiPV: 1, threshold: 0,   minThink: 1600 },
+  { elo: 2200, skill:14, depth:13, movetime: null, multiPV: 1, threshold: 0,   minThink: 1800 },
+  { elo: 2350, skill:15, depth:null, movetime: 800,  multiPV: 1, threshold: 0, minThink: 800  },
+  { elo: 2500, skill:16, depth:null, movetime:1200,  multiPV: 1, threshold: 0, minThink: 1200 },
+  { elo: 2650, skill:17, depth:null, movetime:1800,  multiPV: 1, threshold: 0, minThink: 1800 },
+  { elo: 2800, skill:18, depth:null, movetime:2500,  multiPV: 1, threshold: 0, minThink: 2500 },
+  { elo: 2900, skill:19, depth:null, movetime:3000,  multiPV: 1, threshold: 0, minThink: 3000 },
+  { elo: 3000, skill:20, depth:null, movetime:4000,  multiPV: 1, threshold: 0, minThink: 4000 },
+];
+
+const PIECE_BASE = 'https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/piece/cburnett/';
+const pieceUrl = (color, type) => PIECE_BASE + color + type.toUpperCase() + '.svg';
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let chess          = new Chess();
+let engine         = null;
+let engineReady    = false;
+let playerColor    = 'w';
+let skillLevel     = 5;
+let selectedSq     = null;
+let legalMoves     = [];
+let lastMove       = null;
+let gameStarted    = false;
+let engineThinking = false;
+let gameId         = 0;
+let pendingPromo   = null;
+let candidates     = [];      // [{move, score}] from MultiPV info lines
+let lastInfoDepth  = 0;
+let engineStartTime = 0;
+
+// ── Settings wiring ───────────────────────────────────────────────────────────
+document.querySelectorAll('[data-color]').forEach(btn => {
+  btn.onclick = () => {
+    if (gameStarted) return;
+    playerColor = btn.dataset.color;
+    document.querySelectorAll('[data-color]').forEach(b => b.classList.toggle('active', b === btn));
+    renderCoords(); renderBoard();
+  };
+});
+
+const slider   = document.getElementById('skill-slider');
+const skillNum = document.getElementById('skill-num');
+const skillElo = document.getElementById('skill-elo');
+
+function updateSliderUI() {
+  skillNum.textContent = skillLevel;
+  skillElo.textContent = '≈ ' + LEVELS[skillLevel].elo + ' ELO';
+}
+
+slider.oninput = () => {
+  if (gameStarted) { slider.value = skillLevel; return; }
+  skillLevel = +slider.value;
+  updateSliderUI();
+};
+
+function lockSettings(locked) {
+  document.querySelectorAll('[data-color]').forEach(b => b.disabled = locked);
+  slider.disabled = locked;
+}
+
+// ── Stockfish engine ──────────────────────────────────────────────────────────
+async function initEngine() {
+  try {
+    setMsg('Loading Stockfish...');
+    const res = await fetch('https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const blob = new Blob([await res.text()], { type: 'application/javascript' });
+    engine = new Worker(URL.createObjectURL(blob));
+    engine.onmessage = e => handleEngineMsg(e.data);
+    engine.onerror   = e => setMsg('Engine error: ' + (e.message || '?'));
+    engine.postMessage('uci');
+  } catch (err) {
+    setMsg('⚠️ Could not load Stockfish: ' + err.message);
+    setStatus('Engine unavailable — try refreshing');
+  }
+}
+
+function handleEngineMsg(line) {
+  if (typeof line !== 'string') return;
+
+  if (line === 'uciok') {
+    engine.postMessage('isready');
+
+  } else if (line === 'readyok') {
+    engineReady = true;
+    setMsg('');
+    if (!gameStarted) setStatus('Choose settings and make your first move');
+
+  } else if (line.startsWith('info') && line.includes('multipv')) {
+    // Parse MultiPV info lines to collect candidate moves
+    const mpvM   = line.match(/multipv (\d+)/);
+    const depthM = line.match(/\bdepth (\d+)/);
+    const cpM    = line.match(/score cp (-?\d+)/);
+    const mateM  = line.match(/score mate (-?\d+)/);
+    const pvM    = line.match(/ pv ([a-h][1-8][a-h][1-8][qrbn]?)/);
+    if (!mpvM || !pvM) return;
+
+    const mpv   = parseInt(mpvM[1]);
+    const depth = depthM ? parseInt(depthM[1]) : 0;
+
+    // Reset candidates when we reach a new (deeper) depth at the first PV
+    if (mpv === 1 && depth > lastInfoDepth) {
+      lastInfoDepth = depth;
+      candidates = [];
+    }
+
+    let score;
+    if (cpM)   score = parseInt(cpM[1]);
+    else if (mateM) { const n = parseInt(mateM[1]); score = n > 0 ? 100000 - n : -100000 - n; }
+    else return;
+
+    candidates[mpv - 1] = { move: pvM[1], score };
+
+  } else if (line.startsWith('bestmove')) {
+    const bestMove = line.split(' ')[1];
+    if (!bestMove || bestMove === '(none)') { engineThinking = false; return; }
+
+    // Choose from candidates based on level threshold
+    const chosen = selectMove(bestMove);
+
+    // Respect minimum think time so moves aren't instant
+    const elapsed = Date.now() - engineStartTime;
+    const delay   = Math.max(0, LEVELS[skillLevel].minThink - elapsed);
+
+    setTimeout(() => {
+      engineThinking = false;
+      applyEngineMove(chosen);
+    }, delay);
+  }
+}
+
+function selectMove(bestMove) {
+  const cfg = LEVELS[skillLevel];
+  if (cfg.threshold === 0 || candidates.length < 2) return bestMove;
+
+  const valid = candidates.filter(Boolean);
+  if (valid.length < 2) return bestMove;
+
+  const bestScore = valid[0].score;
+
+  // Keep candidates whose score is within threshold of the best
+  const eligible = valid.filter(c => (bestScore - c.score) <= cfg.threshold);
+  if (eligible.length < 2) return bestMove;
+
+  // Weighted pick: rank 1 gets weight 3, rank 2 gets weight 2, rank 3 gets weight 1
+  // This means it still tends to play better moves, just not always the best
+  const weights = eligible.map((_, i) => Math.max(1, eligible.length - i));
+  const total   = weights.reduce((a, b) => a + b, 0);
+  let rand = Math.random() * total;
+  for (let i = 0; i < eligible.length; i++) {
+    rand -= weights[i];
+    if (rand <= 0) return eligible[i].move;
+  }
+  return eligible[eligible.length - 1].move;
+}
+
+function askEngine(gid) {
+  if (!engineReady || engineThinking || gid !== gameId) return;
+
+  const cfg = LEVELS[skillLevel];
+  engineThinking  = true;
+  candidates      = [];
+  lastInfoDepth   = 0;
+  engineStartTime = Date.now();
+
+  engine.postMessage(`setoption name Skill Level value ${cfg.skill}`);
+  engine.postMessage(`setoption name MultiPV value ${cfg.multiPV}`);
+  engine.postMessage('isready');
+  engine.postMessage(`position fen ${chess.fen()}`);
+  engine.postMessage(cfg.depth !== null ? `go depth ${cfg.depth}` : `go movetime ${cfg.movetime}`);
+  setStatus('Stockfish is thinking...');
+}
+
+function applyEngineMove(uci) {
+  const from  = uci.slice(0, 2);
+  const to    = uci.slice(2, 4);
+  const promo = uci[4] || 'q';
+  const result = chess.move({ from, to, promotion: promo });
+  if (result) {
+    lastMove   = { from: result.from, to: result.to };
+    selectedSq = null; legalMoves = [];
+    renderBoard(); updateStatus();
+  }
+}
+
+// ── Drag and drop ─────────────────────────────────────────────────────────────
+const DRAG_THRESHOLD = 5; // px movement before drag activates
+let drag = null; // { fromSq, startX, startY, active, ghost }
+
+function onSquarePointerDown(sq, e) {
+  if (chess.game_over() || engineThinking) return;
+  if (chess.turn() !== playerColor) return;
+
+  e.preventDefault();
+  const piece = chess.get(sq);
+  const canDrag = !!(piece && piece.color === playerColor);
+  drag = { fromSq: sq, startX: e.clientX, startY: e.clientY, active: false, ghost: null, canDrag };
+}
+
+document.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
+
+  if (!drag.active && drag.canDrag && Math.hypot(dx, dy) > DRAG_THRESHOLD) {
+    drag.active = true;
+
+    // Select piece and show legal moves
+    selectedSq = drag.fromSq;
+    legalMoves = chess.moves({ square: drag.fromSq, verbose: true });
+    renderBoard();
+
+    // Create ghost image
+    const piece = chess.get(drag.fromSq);
+    const ghost = document.createElement('img');
+    ghost.src = pieceUrl(piece.color, piece.type);
+    ghost.className = 'drag-ghost';
+    ghost.style.left = e.clientX + 'px';
+    ghost.style.top  = e.clientY + 'px';
+    document.body.appendChild(ghost);
+    drag.ghost = ghost;
+  }
+
+  if (drag.active && drag.ghost) {
+    drag.ghost.style.left = e.clientX + 'px';
+    drag.ghost.style.top  = e.clientY + 'px';
+  }
+});
+
+document.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const { fromSq, active, ghost } = drag;
+  drag = null;
+
+  if (ghost) ghost.remove();
+
+  if (active) {
+    // Find square under pointer (hide ghost first so elementFromPoint works)
+    let el = document.elementFromPoint(e.clientX, e.clientY);
+    while (el && !el.dataset.sq) el = el.parentElement;
+    const toSq = el?.dataset.sq;
+
+    if (toSq && toSq !== fromSq && legalMoves.some(m => m.to === toSq)) {
+      if (!gameStarted) { gameStarted = true; lockSettings(true); }
+      const move = legalMoves.find(m => m.to === toSq);
+      if (move.flags.includes('p')) {
+        pendingPromo = { from: fromSq, to: toSq };
+        showPromotion();
+      } else {
+        executeMove(fromSq, toSq);
+      }
+    } else {
+      // Invalid drop — deselect
+      selectedSq = null; legalMoves = [];
+      renderBoard();
+    }
+  } else {
+    // Short tap/click — treat as click
+    handleClick(fromSq);
+  }
+});
+
+// ── Click interaction ─────────────────────────────────────────────────────────
+function handleClick(sq) {
+  if (chess.game_over() || engineThinking) return;
+  if (chess.turn() !== playerColor) return;
+
+  if (!gameStarted) { gameStarted = true; lockSettings(true); }
+
+  const piece = chess.get(sq);
+
+  if (selectedSq === sq) {
+    selectedSq = null; legalMoves = [];
+    renderBoard(); return;
+  }
+
+  if (selectedSq && legalMoves.some(m => m.to === sq)) {
+    const move = legalMoves.find(m => m.to === sq);
+    if (move.flags.includes('p')) {
+      pendingPromo = { from: selectedSq, to: sq };
+      showPromotion(); return;
+    }
+    executeMove(selectedSq, sq); return;
+  }
+
+  if (piece && piece.color === playerColor) {
+    selectedSq = sq;
+    legalMoves = chess.moves({ square: sq, verbose: true });
+    renderBoard();
+  } else {
+    selectedSq = null; legalMoves = [];
+    renderBoard();
+  }
+}
+
+function executeMove(from, to, promotion) {
+  const result = chess.move({ from, to, promotion: promotion || 'q' });
+  if (!result) return;
+  lastMove   = { from: result.from, to: result.to };
+  selectedSq = null; legalMoves = [];
+  renderBoard(); updateStatus();
+  if (!chess.game_over()) {
+    const gid = gameId;
+    setTimeout(() => askEngine(gid), 50);
+  }
+}
+
+// ── Promotion ─────────────────────────────────────────────────────────────────
+function showPromotion() {
+  const overlay  = document.getElementById('promo-overlay');
+  const piecesEl = document.getElementById('promo-pieces');
+  overlay.classList.add('visible');
+  piecesEl.innerHTML = '';
+  ['q','r','b','n'].forEach(t => {
+    const btn = document.createElement('div');
+    btn.className = 'promo-piece';
+    const img = document.createElement('img');
+    img.src = pieceUrl(playerColor, t);
+    btn.appendChild(img);
+    btn.onclick = () => {
+      overlay.classList.remove('visible');
+      const { from, to } = pendingPromo;
+      pendingPromo = null;
+      executeMove(from, to, t);
+    };
+    piecesEl.appendChild(btn);
+  });
+}
+
+// ── Material counter ──────────────────────────────────────────────────────────
+function renderMaterial() {
+  const STARTING = { p: 8, n: 2, b: 2, r: 2, q: 1 };
+  const VALUES   = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+  const DISPLAY  = ['p', 'n', 'b', 'r', 'q'];
+
+  const counts = { w: {p:0,n:0,b:0,r:0,q:0}, b: {p:0,n:0,b:0,r:0,q:0} };
+  for (const row of chess.board())
+    for (const sq of row)
+      if (sq && sq.type !== 'k') counts[sq.color][sq.type]++;
+
+  // cap[c][t] = pieces of type t that color c has captured from the opponent
+  const cap = { w: {}, b: {} };
+  for (const t of DISPLAY) {
+    cap.w[t] = Math.max(0, STARTING[t] - counts.b[t]);
+    cap.b[t] = Math.max(0, STARTING[t] - counts.w[t]);
+  }
+
+  const wScore = DISPLAY.reduce((s, t) => s + VALUES[t] * cap.w[t], 0);
+  const bScore = DISPLAY.reduce((s, t) => s + VALUES[t] * cap.b[t], 0);
+
+  // bottom panel = playerColor, top panel = opponent (matches board orientation)
+  const bot = playerColor, top = playerColor === 'w' ? 'b' : 'w';
+  const botAdv = bot === 'w' ? Math.max(0, wScore - bScore) : Math.max(0, bScore - wScore);
+  const topAdv = top === 'w' ? Math.max(0, wScore - bScore) : Math.max(0, bScore - wScore);
+
+  // Icons shown are the captured OPPONENT's pieces, so use opponent's color
+  fillMaterialRow('material-top',    cap[top], top === 'w' ? 'b' : 'w', topAdv, DISPLAY);
+  fillMaterialRow('material-bottom', cap[bot], bot === 'w' ? 'b' : 'w', botAdv, DISPLAY);
+}
+
+function fillMaterialRow(id, captured, iconColor, advantage, order) {
+  const el = document.getElementById(id);
+  el.innerHTML = '';
+  const line = document.createElement('div');
+  line.className = 'material-pieces-line';
+  for (const t of order) {
+    for (let i = 0; i < (captured[t] || 0); i++) {
+      const img = document.createElement('img');
+      img.src = pieceUrl(iconColor, t);
+      img.className = 'm-piece';
+      line.appendChild(img);
+    }
+  }
+  if (advantage > 0) {
+    const adv = document.createElement('span');
+    adv.className = 'material-adv';
+    adv.textContent = '+' + advantage;
+    line.appendChild(adv);
+  }
+  el.appendChild(line);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function posToSq(row, col) {
+  const file = playerColor === 'w' ? col     : 7 - col;
+  const rank = playerColor === 'w' ? 7 - row : row;
+  return String.fromCharCode(97 + file) + (rank + 1);
+}
+
+function findKingSq(color) {
+  const b = chess.board();
+  for (let r = 0; r < 8; r++)
+    for (let c = 0; c < 8; c++) {
+      const p = b[r][c];
+      if (p && p.type === 'k' && p.color === color)
+        return String.fromCharCode(97 + c) + (8 - r);
+    }
+  return null;
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────────────
+function renderCoords() {
+  const rankEl = document.getElementById('rank-labels');
+  const fileEl = document.getElementById('file-labels');
+  rankEl.innerHTML = ''; fileEl.innerHTML = '';
+  const ranks = playerColor === 'w' ? ['8','7','6','5','4','3','2','1'] : ['1','2','3','4','5','6','7','8'];
+  const files = playerColor === 'w' ? ['a','b','c','d','e','f','g','h'] : ['h','g','f','e','d','c','b','a'];
+  ranks.forEach(r => { const d = document.createElement('div'); d.className = 'rank-label'; d.textContent = r; rankEl.appendChild(d); });
+  files.forEach(f => { const d = document.createElement('div'); d.className = 'file-label'; d.textContent = f; fileEl.appendChild(d); });
+}
+
+function renderBoard() {
+  const boardEl    = document.getElementById('board');
+  boardEl.innerHTML = '';
+  const legalSet   = new Set(legalMoves.map(m => m.to));
+  const captureSet = new Set(legalMoves.filter(m => m.captured || m.flags.includes('e')).map(m => m.to));
+  const checkSq    = chess.in_check() ? findKingSq(chess.turn()) : null;
+
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < 8; col++) {
+      const sq      = posToSq(row, col);
+      const isLight = (row + col) % 2 === 0;
+      const el      = document.createElement('div');
+      el.className  = 'sq ' + (isLight ? 'light' : 'dark');
+      el.dataset.sq = sq; // used by drag drop
+
+      if (sq === selectedSq)          el.classList.add('selected');
+      else if (lastMove?.from === sq) el.classList.add('last-from');
+      else if (lastMove?.to   === sq) el.classList.add('last-to');
+      if (sq === checkSq)             el.classList.add('in-check');
+      if (captureSet.has(sq))         el.classList.add('legal-capture');
+      else if (legalSet.has(sq))      el.classList.add('legal');
+
+      const piece = chess.get(sq);
+      if (piece) {
+        const img = document.createElement('img');
+        img.src       = pieceUrl(piece.color, piece.type);
+        img.className = 'piece-img';
+        img.draggable = false;
+        el.appendChild(img);
+      }
+
+      el.addEventListener('pointerdown', e => onSquarePointerDown(sq, e));
+      boardEl.appendChild(el);
+    }
+  }
+  renderMaterial();
+}
+
+function updateStatus() {
+  if (chess.in_checkmate())              setStatus(chess.turn() === playerColor ? 'Checkmate — Stockfish wins!' : 'Checkmate — You win! 🎉');
+  else if (chess.in_stalemate())         setStatus('Draw by stalemate');
+  else if (chess.in_threefold_repetition()) setStatus('Draw by repetition');
+  else if (chess.insufficient_material())   setStatus('Draw — insufficient material');
+  else if (chess.in_draw())              setStatus('Draw');
+  else if (chess.in_check())             setStatus((chess.turn() === playerColor ? 'You are' : 'Stockfish is') + ' in check!');
+  else setStatus('Your turn');
+}
+
+function setStatus(t) { document.getElementById('status').textContent = t; }
+function setMsg(t)    { document.getElementById('engine-msg').textContent = t; }
+
+// ── New game ──────────────────────────────────────────────────────────────────
+function newGame() {
+  gameId++;
+  chess = new Chess();
+  selectedSq = null; legalMoves = []; lastMove = null;
+  gameStarted = false; engineThinking = false; pendingPromo = null;
+  candidates = []; lastInfoDepth = 0;
+  document.getElementById('promo-overlay').classList.remove('visible');
+  lockSettings(false);
+  renderBoard();
+  setStatus(engineReady ? 'Choose settings and make your first move' : 'Loading engine...');
+
+  if (playerColor === 'b') {
+    gameStarted = true; lockSettings(true);
+    const gid = gameId;
+    setTimeout(() => askEngine(gid), 400);
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+updateSliderUI();
+renderCoords();
+renderBoard();
+initEngine().then(newGame);
+</script>
+</body>
+</html>
